@@ -369,7 +369,7 @@ boolean connectedToSomeAP=false;
     delay(500);
     Serial.print(".");
       if(i==10){
-        Serial.print("Not possible to connected to Plinio's cellphone\n");
+        Serial.print("Not possible to connected to Plinio's home\n");
       }
     }
     else{
@@ -383,7 +383,8 @@ boolean connectedToSomeAP=false;
 
   if(connectedToSomeAP == true){  
   Blynk.connect(3333); 
-  Blynk.config(auth, "blynk-cloud.com", 8442);
+  IPAddress blynk_IP(139, 59, 206, 133);
+  Blynk.config(auth, blynk_IP, 8442);//8442
   while (Blynk.connect() == false) {
     // Wait until connected
      Serial.print("Blynk trying to connect..");
@@ -596,7 +597,13 @@ void loop() {
     Blynk.run();
     server.handleClient(); 
    }
-     
+   else{
+    RtcDateTime now = Rtc.GetDateTime();
+    int reconnect_Min = now.Minute(); 
+      if(reconnect_Min%5==0){
+      connectAllServices(); 
+      }
+   }
     
   if (P.displayAnimate())
   {
