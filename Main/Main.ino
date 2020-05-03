@@ -14,6 +14,7 @@
 #include <Wire.h> // must be included here so that Arduino library object file references work
 #include <RtcDS3231.h>
 #include <BlynkSimpleEsp8266.h>
+#include "DHTesp.h"
 
 #include "Font_Data.h"
 
@@ -28,7 +29,9 @@ RtcDS3231<TwoWire> Rtc(Wire);
 #define DATA_PIN  13
 #define CS_PIN    15
 
+#define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 
+DHTesp dht;
 
 const int AnalogIn  = A0;
 int readingLight = 16;
@@ -65,7 +68,7 @@ String form =
 ESP8266WebServer server(80);                             // HTTP server will listen at port 80  
 
 // HARDWARE SPI
-MD_Parola P = MD_Parola(CS_PIN, MAX_DEVICES);
+MD_Parola P = MD_Parola(HARDWARE_TYPE,CS_PIN, MAX_DEVICES);
 
 
 #define PAUSE_TIME  0
@@ -78,6 +81,7 @@ char curMessage[BUF_SIZE];
 static uint8_t  state = 0;
 char timeData[20];
 char tempData[20];
+char humData[20];
 uint8_t degC[] = { 6, 3, 3, 56, 68, 68, 68 }; // Deg C
 
 // Turn on debug statements to the serial output
@@ -305,7 +309,7 @@ boolean connectedToSomeAP=false;
     IPAddress subnet_mask_1 (255, 255, 255, 0);
 
     WiFi.config(arduino_ip_1,gateway_ip_1,subnet_mask_1);
-    WiFi.begin("V.Zani", "v.z41374293");  
+    WiFi.begin("Gorduchos", "ntpl2201");  
 
   //Check if connection was sucessful
    for (int i=0; i <= 10; i++){
@@ -444,6 +448,8 @@ void setup() {
   Serial.begin(9600);
   pinMode(BUTTON, INPUT);
   
+  dht.setup(2, DHTesp::DHT22); // Connect DHT sensor to GPIO 2
+  
   P.begin();
   P.setInvert(false);
   P.setIntensity(5);
@@ -525,7 +531,7 @@ void setup() {
     RtcDateTime alarmTime = now + 88; // into the future
     DS3231AlarmOne alarm1(
             0,
-            21,
+            22,
             0, 
             0,
             DS3231AlarmOneControl_HoursMinutesSecondsMatch);
@@ -563,12 +569,17 @@ RtcDateTime readDateTime(bool f = true){
 return now; 
 }
 
-void readTemp(){
-  RtcTemperature temp = Rtc.GetTemperature();
-  float temp1 = temp.AsFloat();
-  int a = temp1; // a will contain 123
-   sprintf(tempData, "%dº", a);
-  Serial.println(tempData); 
+void readTempHum(){
+   float humidity = dht.getHumidity();
+   float temperature = dht.getTemperature();
+//  RtcTemperature temp = Rtc.GetTemperature();
+//  float temp1 = temp.AsFloat();
+   int temp = temperature; //
+   int hum = humidity;
+   sprintf(tempData, "T: %dº", temp);
+   sprintf(humData, "U: %d%%", hum);
+   Serial.println(tempData); 
+   Serial.println(humData); 
 }
 
 
@@ -588,11 +599,19 @@ void printDateTime(const RtcDateTime& dt)
 
 void loop() {
   static uint32_t lastTime = 0; // millis() memory
+  static uint32_t lastReadTime;
   static uint8_t  display = 0;  // current display mode
   static bool flasher = false;  // seconds passing flasher
   
   buttonPressed();//Verfica se o botão foi pressionado e muda de estado   
-   
+
+  //Read Temp and Humidity
+  if (millis() - lastReadTime >= dht.getMinimumSamplingPeriod())
+  {
+    lastReadTime = millis();
+    readTempHum();
+  }
+
    if (Blynk.connected()){
     Blynk.run();
     server.handleClient(); 
@@ -635,13 +654,19 @@ void loop() {
     
     case 2:
     P.setFont(numeric7Seg);
-    readTemp();
     M[2].msg=tempData;
     P.displayText(M[state].msg, PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
     P.setCharSpacing(M[state].spacing);
     P.displayReset();
     break;
-    
+
+    case 3:
+    P.setFont(numeric7Seg);
+    M[3].msg=humData;
+    P.displayText(M[state].msg, PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
+    P.setCharSpacing(M[state].spacing);
+    P.displayReset();
+    break;
     }
 
     Alarmed();//Verifica se o alarme foi acionado
@@ -717,13 +742,15 @@ int countRoll=0;
         if((millis()- butoonFirstPressed)<400){
         Serial.println("Opção 1");
         countRoll++;
-        state=countRoll%3; 
+        state=countRoll%4; 
         P.displayText(" ", PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
         }
+        
         if((millis()- butoonFirstPressed)<5000 && (millis()- butoonFirstPressed)>400){
         modifyIntensity();
          Serial.println(maxIntensity);
         }
+        
         if((millis()- butoonFirstPressed)>5000){
         Serial.println("Opção 3");
             if( connected == true){
