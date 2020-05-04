@@ -576,6 +576,7 @@ void readTempHum(){
 //  float temp1 = temp.AsFloat();
    int temp = temperature; //
    int hum = humidity;
+   int heatIndex = dht.computeHeatIndex(temperature, humidity, false);
    sprintf(tempData, "T: %dº", temp);
    sprintf(humData, "U: %d%%", hum);
    Serial.println(tempData); 
