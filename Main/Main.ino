@@ -15,6 +15,7 @@
 #include <RtcDS3231.h>
 #include <BlynkSimpleEsp8266.h>
 #include "DHTesp.h"
+#include <PubSubClient.h> //MQTT Service
 
 #include "Font_Data.h"
 
@@ -49,6 +50,11 @@ char auth[] = "49ddd52105de4ee39514b8bcad234837";
  char ssid[] = "MyASUS";
  char pass[] = "27699659";
 
+IPAddress mqtt_server(192, 168, 15, 48);
+WiFiClient espClient;
+PubSubClient client(espClient);
+char MQTTmsg[50];
+
 boolean connected = false;
 
 WidgetLCD lcd(V4);
@@ -78,7 +84,7 @@ MD_Parola P = MD_Parola(HARDWARE_TYPE,CS_PIN, MAX_DEVICES);
 int offset=1,refresh=0;
 String decodedMsg;
 char curMessage[BUF_SIZE];  
-static uint8_t  state = 0;
+static uint8_t  state = 1;
 char timeData[20];
 char tempData[20];
 char humData[20];
@@ -357,34 +363,6 @@ boolean connectedToSomeAP=false;
    }
 //-----------------------------------------------------------------
 
-  //Try connection on Plinio's home  
-  if(connectedToSomeAP == false){  //test if it was already connected
-    IPAddress arduino_ip_3 (192, 168, 0, 20);
-    IPAddress dns_ip_3     (  8,   8,   8,   8);
-    IPAddress gateway_ip_3 (192, 168, 0, 1);
-    IPAddress subnet_mask_3 (255, 255, 255, 0);
-
-    WiFi.config(arduino_ip_3,gateway_ip_3,subnet_mask_3);
-    WiFi.begin("Wifi", "fpga1234");  
-
-  //Check if connection was sucessful
-   for (int i=0; i <= 10; i++){
-    if(WiFi.status() != WL_CONNECTED){
-    delay(500);
-    Serial.print(".");
-      if(i==10){
-        Serial.print("Not possible to connected to Plinio's home\n");
-      }
-    }
-    else{
-    Serial.print("Connected to Plinio's home\n");
-    connectedToSomeAP = true;
-    break;
-    }
-   }
-  }
-//-----------------------------------------------------------------
-
   if(connectedToSomeAP == true){  
   Blynk.connect(3333); 
   IPAddress blynk_IP(139, 59, 206, 133);
@@ -428,6 +406,33 @@ boolean connectedToSomeAP=false;
     Serial.print("Blynk NOT connected\n");
     connected = false;
   }
+
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+}
+
+void reconnectMQTT() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str(),"pcosta", "PlinioPc1623" )) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("outTopic", "hello world");
+      // ... and resubscribe
+      client.subscribe("inTopic");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
 }
 
 void disconnectAllServices(){
@@ -442,6 +447,17 @@ void disconnectAllServices(){
       P.displayText("Desconectado", PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_SCROLL_LEFT, PA_SCROLL_LEFT);
       P.setCharSpacing(M[0].spacing);
       P.displayReset();
+}
+
+//MQTT Callback
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
 }
 
 void setup() {
@@ -577,10 +593,22 @@ void readTempHum(){
    int temp = temperature; //
    int hum = humidity;
    int heatIndex = dht.computeHeatIndex(temperature, humidity, false);
-   sprintf(tempData, "T: %dº", temp);
-   sprintf(humData, "U: %d%%", hum);
+   sprintf(tempData, "%dC", temp);
+   sprintf(humData, "%d%%", hum);
    Serial.println(tempData); 
    Serial.println(humData); 
+   snprintf (MQTTmsg, 75, "%ld", temp);
+   Serial.print("Publish message: ");
+   Serial.println(MQTTmsg);
+   client.publish("tempQuarto", MQTTmsg);
+   snprintf (MQTTmsg, 75, "%ld", hum);
+   Serial.print("Publish message: ");
+   Serial.println(MQTTmsg);
+   client.publish("umidQuarto", MQTTmsg);
+   snprintf (MQTTmsg, 75, "%ld", heatIndex);
+   Serial.print("Publish message: ");
+   Serial.println(MQTTmsg);
+   client.publish("senTerm", MQTTmsg);
 }
 
 
@@ -613,17 +641,22 @@ void loop() {
     readTempHum();
   }
 
-   if (Blynk.connected()){
+  if (Blynk.connected()){
     Blynk.run();
     server.handleClient(); 
-   }
-   else{
+  }
+  else{
     RtcDateTime now = Rtc.GetDateTime();
     int reconnect_Min = now.Minute(); 
       if(reconnect_Min%5==0){
       connectAllServices(); 
       }
-   }
+  }
+
+  if (!client.connected()) {
+    reconnectMQTT();
+  }
+  client.loop();
     
   if (P.displayAnimate())
   {
@@ -654,7 +687,8 @@ void loop() {
     break;
     
     case 2:
-    P.setFont(numeric7Seg);
+    P.setFont(NULL);
+//    P.setFont(numeric7Seg);
     M[2].msg=tempData;
     P.displayText(M[state].msg, PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
     P.setCharSpacing(M[state].spacing);
@@ -662,7 +696,7 @@ void loop() {
     break;
 
     case 3:
-    P.setFont(numeric7Seg);
+    P.setFont(NULL);
     M[3].msg=humData;
     P.displayText(M[state].msg, PA_CENTER, SPEED_TIME, PAUSE_TIME, PA_PRINT, PA_NO_EFFECT);
     P.setCharSpacing(M[state].spacing);
@@ -725,7 +759,7 @@ const int buttonPin = 16;
 boolean prevPressedButton = false;
 int butoonFirstPressed = 0;
 int countButtonFalse = 0;
-int countRoll=0;
+int countRoll=1;
 
   void buttonPressed() {
     int reading = digitalRead(BUTTON);// read the state of the switch into a local variable:
